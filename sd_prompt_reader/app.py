@@ -6,7 +6,7 @@ __email__ = "receyuki@gmail.com"
 
 import platform
 import sys
-from tkinter import PhotoImage, Menu
+from tkinter import PhotoImage, Menu, TclError
 
 import pyperclip as pyperclip
 from CTkToolTip import CTkToolTip
@@ -675,42 +675,43 @@ class App(Tk):
         if raw:
             self.button_raw.enable()
             self.button_export.enable()
-        
+            
     def resize_image(self, event=None):
+        # Prevent errors during shutdown
+        if not self.winfo_exists():
+            return
+
         # resize image to window size
         if self.image:
             aspect_ratio = self.image.size[0] / self.image.size[1]
-            # fix windows huge image problem under hidpi
             self.scaling = ScalingTracker.get_window_dpi_scaling(self)
-            # resize image to window size
-            image_frame_height = (
-                self.image_frame.winfo_height()
-                if self.image_frame.winfo_height() > 2
-                else 560
-            )
-            image_frame_width = (
-                self.image_frame.winfo_width() - 5
-                if self.image_frame.winfo_width() > 2
-                else 560
-            )
+
+            # Safely get frame dimensions
+            try:
+                image_frame_height = self.image_frame.winfo_height()
+                image_frame_width = self.image_frame.winfo_width()
+            except TclError:
+                # Widget destroyed
+                return
+
+            # Use fallback if too small
+            if image_frame_height <= 2:
+                image_frame_height = 560
+            if image_frame_width <= 2:
+                image_frame_width = 560
+
             if self.image.size[0] > self.image.size[1]:
-                self.image_tk.configure(
-                    size=tuple(
-                        int(num / self.scaling)
-                        for num in (image_frame_width, image_frame_width / aspect_ratio)
-                    )
+                new_size = (
+                    int(image_frame_width / self.scaling),
+                    int((image_frame_width / aspect_ratio) / self.scaling)
                 )
             else:
-                self.image_tk.configure(
-                    size=tuple(
-                        int(num / self.scaling)
-                        for num in (
-                            image_frame_height * aspect_ratio,
-                            image_frame_height,
-                        )
-                    )
+                new_size = (
+                    int((image_frame_height * aspect_ratio) / self.scaling),
+                    int(image_frame_height / self.scaling)
                 )
-            # display image
+
+            self.image_tk.configure(size=new_size)
             self.image_label.configure(image=self.image_tk, text="")
 
     def copy_to_clipboard(self, content):
