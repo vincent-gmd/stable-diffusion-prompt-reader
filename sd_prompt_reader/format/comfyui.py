@@ -1,3 +1,4 @@
+# _sd_prompt_reader/format/comfyui.py
 __author__ = "receyuki"
 __filename__ = "comfyui.py"
 __copyright__ = "Copyright 2023"
@@ -55,7 +56,25 @@ class ComfyUI(BaseFormat):
             self._setting = ""
             self._parameter = dict.fromkeys(BaseFormat.PARAMETER_KEY, "")
             self._is_sdxl = False
-            self._raw = "\n".join([self._prompt, self._workflow])
+
+            # ✅ Always output clean, formatted raw metadata on error
+            raw_prompt = self._info.get("prompt", {})
+            raw_workflow = self._info.get("workflow", {})
+
+            parts = []
+            if raw_prompt:
+                if isinstance(raw_prompt, str):
+                    parts.append("Prompt:\n" + raw_prompt)
+                else:
+                    parts.append("Prompt:\n" + json.dumps(raw_prompt, indent=2))
+            if raw_workflow:
+                if isinstance(raw_workflow, str):
+                    parts.append("Workflow:\n" + raw_workflow)
+                else:
+                    parts.append("Workflow:\n" + json.dumps(raw_workflow, indent=2))
+
+            self._raw = "\n\n".join(parts) if parts else "No ComfyUI metadata found"
+
             return self._status
         else:
             self._status = self.Status.READ_SUCCESS
@@ -67,7 +86,20 @@ class ComfyUI(BaseFormat):
     def _comfy_png(self):
         self._prompt = self._info.get("prompt", {})
         self._workflow = self._info.get("workflow", {})
-        prompt_json = json.loads(str(self._prompt))
+
+        # Handle prompt: already dict (normal) or string (fallback)
+        if isinstance(self._prompt, dict):
+            prompt_json = self._prompt
+        elif isinstance(self._prompt, str):
+            try:
+                prompt_json = json.loads(self._prompt)
+            except (json.JSONDecodeError, TypeError):
+                prompt_json = {}
+        else:
+            prompt_json = {}
+
+        if not prompt_json:
+            raise ValueError("Prompt data is empty or invalid")
 
         # find end node of each flow
         end_nodes = list(
@@ -202,10 +234,10 @@ class ComfyUI(BaseFormat):
                     self._parameter[p] = str(longest_flow.get(s))
 
         if self._is_sdxl:
-            if not self._positive and self.positive_sdxl:
-                self._positive = self.merge_clip(self.positive_sdxl)
-            if not self._negative and self.negative_sdxl:
-                self._negative = self.merge_clip(self.negative_sdxl)
+            if not self._positive and self._positive_sdxl:
+                self._positive = self.merge_clip(self._positive_sdxl)
+            if not self._negative and self._negative_sdxl:
+                self._negative = self.merge_clip(self._negative_sdxl)
             empty_prompt = (0 if self._positive_sdxl else 1) + (
                 0 if self._negative_sdxl else 1
             )
@@ -219,8 +251,8 @@ class ComfyUI(BaseFormat):
 
     @staticmethod
     def merge_clip(data: dict):
-        clip_g = data.get("Clip G").strip(" ,")
-        clip_l = data.get("Clip L").strip(" ,")
+        clip_g = data.get("Clip G", "").strip(" ,")
+        clip_l = data.get("Clip L", "").strip(" ,")
 
         if clip_g == clip_l:
             return clip_g
@@ -233,7 +265,7 @@ class ComfyUI(BaseFormat):
         inputs = {}
         try:
             inputs = prompt[end_node]["inputs"]
-        except:
+        except Exception:
             print("node error")
             return flow, node
         match prompt[end_node]["class_type"]:
@@ -244,7 +276,7 @@ class ComfyUI(BaseFormat):
                     )
                     flow = merge_dict(flow, last_flow)
                     node += last_node
-                except:
+                except Exception:
                     print("comfyUI SaveImage error")
             case node_type if node_type in ComfyUI.KSAMPLER_TYPES:
                 try:
@@ -306,7 +338,7 @@ class ComfyUI(BaseFormat):
                     flow = merge_dict(flow, last_flow1)
                     flow = merge_dict(flow, last_flow2)
                     node += last_node1 + last_node2
-                except:
+                except Exception:
                     print("comfyUI KSampler error")
             case node_type if node_type in ComfyUI.CLIP_TEXT_ENCODE_TYPE:
                 try:
@@ -359,7 +391,7 @@ class ComfyUI(BaseFormat):
                                 return
                             elif isinstance(inputs["text"], str):
                                 return {"Refiner": inputs.get("text")}
-                except:
+                except Exception:
                     print("comfyUI CLIPText error")
             case "LoraLoader":
                 try:
@@ -369,12 +401,12 @@ class ComfyUI(BaseFormat):
                     )
                     flow = merge_dict(flow, last_flow)
                     node += last_node
-                except:
+                except Exception:
                     print("comfyUI LoraLoader error")
             case node_type if node_type in ComfyUI.CHECKPOINT_LOADER_TYPE:
                 try:
                     return inputs, node
-                except:
+                except Exception:
                     print("comfyUI CheckpointLoader error")
             case node_type if node_type in ComfyUI.VAE_ENCODE_TYPE:
                 try:
@@ -383,7 +415,7 @@ class ComfyUI(BaseFormat):
                     )
                     flow = merge_dict(flow, last_flow)
                     node += last_node
-                except:
+                except Exception:
                     print("comfyUI VAE error")
             case "ControlNetApplyAdvanced":
                 try:
@@ -403,7 +435,7 @@ class ComfyUI(BaseFormat):
                     )
                     flow = merge_dict(flow, last_flow)
                     node += last_node
-                except:
+                except Exception:
                     print("comfyUI ControlNetApply error")
             case "ImageScale":
                 try:
@@ -413,12 +445,12 @@ class ComfyUI(BaseFormat):
                     )
                     flow = merge_dict(flow, last_flow)
                     node += last_node
-                except:
+                except Exception:
                     print("comfyUI ImageScale error")
             case "UpscaleModelLoader":
                 try:
                     return {"upscaler": inputs["model_name"]}
-                except:
+                except Exception:
                     print("comfyUI UpscaleLoader error")
             case "ImageUpscaleWithModel":
                 try:
@@ -430,7 +462,7 @@ class ComfyUI(BaseFormat):
                     flow = merge_dict(flow, last_flow)
                     flow = merge_dict(flow, model)
                     node += last_node
-                except:
+                except Exception:
                     print("comfyUI UpscaleModel error")
             case "ConditioningCombine":
                 try:
@@ -443,29 +475,29 @@ class ComfyUI(BaseFormat):
                     flow = merge_dict(flow, last_flow1)
                     flow = merge_dict(flow, last_flow2)
                     node += last_node1 + last_node2
-                except:
+                except Exception:
                     print("comfyUI ConditioningCombine error")
             # SD Prompt Reader Node
             case "SDPromptReader":
                 try:
                     return json.loads(prompt[end_node]["is_changed"][0])
-                except:
+                except Exception:
                     print("comfyUI SDPromptReader error")
             case "SDParameterGenerator":
                 try:
                     return inputs
-                except:
+                except Exception:
                     print("comfyUI SDParameterGenerator error")
             # custom nodes
             case "SDXLPromptStyler":
                 try:
                     return inputs.get("text_positive"), inputs.get("text_negative")
-                except:
+                except Exception:
                     print("comfyUI SDXLPromptStyler error")
             case "CR Seed":
                 try:
                     return inputs.get("seed")
-                except:
+                except Exception:
                     print("comfyUI CR Seed error")
             case _:
                 try:
@@ -499,6 +531,6 @@ class ComfyUI(BaseFormat):
                             last_flow, last_node = result
                     flow = merge_dict(flow, last_flow)
                     node += last_node
-                except:
+                except Exception:
                     print("comfyUI bridging node error")
         return flow, node

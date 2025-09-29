@@ -1,3 +1,4 @@
+# _sd_prompt_reader/parameter_viewer.py
 __author__ = "receyuki"
 __filename__ = "parameter_viewer.py"
 __copyright__ = "Copyright 2023"
@@ -160,7 +161,7 @@ class ParameterViewer:
     def copy_to_clipboard(self, content):
         try:
             pyperclip.copy(content)
-        except:
+        except Exception:
             print("Copy error")
         else:
             self.status_bar.clipboard()

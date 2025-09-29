@@ -4,11 +4,23 @@ __copyright__ = "Copyright 2023"
 __email__ = "receyuki@gmail.com"
 
 
-from CTkToolTip import *
+from CTkToolTip import CTkToolTip
 from customtkinter import CTkFrame, CTkLabel, ThemeManager
 
 from .button import STkButton, SortMode, ViewMode, PromptMode, EditMode
-from .constants import *
+from .constants import (
+    COPY_FILE_L,
+    COPY_FILE_S,
+    SORT_FILE,
+    LIGHTBULB_FILE,
+    VIEW_SEPARATE_FILE,
+    VIEW_TAB_FILE,
+    BUTTON_WIDTH_S,
+    BUTTON_HEIGHT_S,
+    TOOLTIP_DELAY,
+    TOOLTIP,
+    MESSAGE,
+)
 from .textbox import STkTextbox
 from .utility import load_icon, copy_to_clipboard
 

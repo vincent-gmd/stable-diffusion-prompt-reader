@@ -1,3 +1,4 @@
+#_sd_prompt_reader/app.py
 __author__ = "receyuki"
 __filename__ = "app.py"
 __copyright__ = "Copyright 2023"
@@ -8,8 +9,9 @@ import sys
 from tkinter import PhotoImage, Menu
 
 import pyperclip as pyperclip
-from CTkToolTip import *
+from CTkToolTip import CTkToolTip
 from PIL import Image
+from pathlib import Path
 from customtkinter import (
     ScalingTracker,
     CTkFrame,
@@ -17,11 +19,44 @@ from customtkinter import (
     filedialog,
     CTkOptionMenu,
     set_default_color_theme,
+    CTkFont,
+    CTkImage,
+    CTkLabel,
+    CTkButton,
 )
 from tkinterdnd2 import DND_FILES
 
-from .button import *
-from .constants import *
+from .button import STkButton, EditMode, SettingMode, ViewMode,SortMode
+from .constants import (
+    COLOR_THEME,
+    DROP_FILE,
+    COPY_FILE_L,
+    COPY_FILE_S,
+    CLEAR_FILE,
+    DOCUMENT_FILE,
+    EDIT_FILE,
+    EDIT_OFF_FILE,
+    SAVE_FILE,
+    EXPAND_FILE,
+    SORT_FILE,
+    LIGHTBULB_FILE,
+    ICON_FILE,
+    ICON_CUBE_FILE,
+    ICO_FILE,
+    MESSAGE,
+    ACCESSIBLE_GRAY,
+    STATUS_BAR_IPAD,
+    BUTTON_WIDTH_S,
+    BUTTON_HEIGHT_S,
+    TOOLTIP_DELAY,
+    TOOLTIP,
+    BUTTON_WIDTH_L,
+    BUTTON_HEIGHT_L,
+    LABEL_HEIGHT,
+    ARROW_WIDTH_L,
+    SUPPORTED_FORMATS,
+    URL,
+)
 from .ctkdnd import Tk
 from .image_data_reader import ImageDataReader
 from .parameter_viewer import ParameterViewer
@@ -31,13 +66,17 @@ from .textbox import STkTextbox
 from .update_checker import UpdateChecker
 from .__version__ import VERSION
 from .logger import Logger
+from enum import Enum
 
+class RawMode(Enum):
+    RAW = "raw"
+    PARSED = "parsed"
 
 class App(Tk):
     def __init__(self):
         super().__init__()
 
-        logger = Logger("SD_Prompt_Reader.App")
+        logger = Logger("SD_Prompt_Reader.App") 
         Logger.configure_global_logger("INFO")
         # window = TkinterDnD.Tk()
         # window = Tk()
@@ -85,6 +124,9 @@ class App(Tk):
         # self.rowconfigure(2, weight=1)
         # self.rowconfigure(3, weight=1)
 
+        # parsed or raw
+        self.raw_mode = RawMode.PARSED
+        
         # image display
         self.image_frame = CTkFrame(self)
         self.image_frame.grid(
@@ -122,6 +164,14 @@ class App(Tk):
             ipadx=STATUS_BAR_IPAD,
             ipady=STATUS_BAR_IPAD,
         )
+        
+        # Raw metadata box
+        self.raw_box = STkTextbox(self, wrap="word", height=400)
+        self.raw_box.grid(
+            row=0, column=1, rowspan=3, columnspan=6, sticky="news", padx=(0, 20), pady=(20, 21)
+        )
+        self.raw_box.text = "Raw metadata will appear here"
+        self.raw_box.grid_remove()  # hidden by default
 
         # textbox
         self.positive_box = PromptViewer(self, self.status_bar, "Prompt")
@@ -219,6 +269,7 @@ class App(Tk):
             delay=TOOLTIP_DELAY,
             message=TOOLTIP["view_setting"],
         )
+
 
         # function buttons
         # edit
@@ -389,6 +440,31 @@ class App(Tk):
             self.button_export, delay=TOOLTIP_DELAY, message=TOOLTIP["export"]
         )
 
+        #toggle raw view
+        self.button_view_frame = CTkFrame(self, fg_color="transparent")
+        self.button_view_frame.grid(row=3, column=6, pady=(0, 20), sticky="w")
+
+        self.button_view = STkButton(
+            self.button_view_frame,
+            width=BUTTON_WIDTH_L,
+            height=BUTTON_HEIGHT_L,
+            image=self.view_image,  # reuse lightbulb icon or add new
+            text="",
+            font=self.info_font,
+            command=self.toggle_raw_mode,
+            mode=ViewMode.NORMAL,  
+        )
+        self.button_view.grid(row=0, column=0)
+        self.button_view_label = CTkLabel(
+            self.button_view_frame,
+            width=BUTTON_WIDTH_L,
+            height=LABEL_HEIGHT,
+            text="Raw",
+            font=self.info_font,
+        )
+        self.button_view_label.grid(row=1, column=0, rowspan=2)
+        self.button_view.label = self.button_view_label
+
         # copy
         self.button_copy_raw_frame = CTkFrame(self, fg_color="transparent")
         self.button_copy_raw_frame.grid(row=3, column=5, pady=(0, 20), sticky="w")
@@ -501,6 +577,8 @@ class App(Tk):
             self.file_path = new_path
             with open(self.file_path, "rb") as f:
                 self.image_data = ImageDataReader(f)
+                
+                self.raw_box.text = self.image_data.true_raw or "No raw metadata"
                 if (
                     not self.image_data.tool
                     or self.image_data.status.name == "FORMAT_ERROR"
@@ -519,7 +597,11 @@ class App(Tk):
                     else:
                         self.positive_box.display(self.image_data.positive_sdxl)
                         self.negative_box.display(self.image_data.negative_sdxl)
-                    self.setting_box.text = self.image_data.setting
+                        if self.image_data.setting:
+                            self.setting_box.text = self.image_data.setting
+                        else:
+                            self.setting_box.text = (self.image_data.raw)           
+
                     self.setting_box_parameter.update_text(self.image_data.parameter)
                     self.positive_box.mode_update()
                     self.negative_box.mode_update()
@@ -568,10 +650,16 @@ class App(Tk):
 
     def unsupported_format(self, message, reset_image=False, url="", raw=False):
         self.readable = False
-        self.setting_box.text = ""
         self.positive_box.display("")
         self.negative_box.display("")
-        self.setting_box_parameter.reset_text()
+        
+        if raw and self.image_data and hasattr(self.image_data, 'raw') and self.image_data.raw:
+            # Display raw metadata in the setting box
+            self.setting_box.text = self.image_data.raw
+        else:
+            self.setting_box.text = ""
+            self.setting_box_parameter.reset_text()
+        
         for button in self.function_buttons:
             button.disable()
         self.positive_box.all_off()
@@ -587,7 +675,7 @@ class App(Tk):
         if raw:
             self.button_raw.enable()
             self.button_export.enable()
-
+        
     def resize_image(self, event=None):
         # resize image to window size
         if self.image:
@@ -628,7 +716,7 @@ class App(Tk):
     def copy_to_clipboard(self, content):
         try:
             pyperclip.copy(content)
-        except:
+        except Exception:
             print("Copy error")
         else:
             self.status_bar.clipboard()
@@ -664,7 +752,7 @@ class App(Tk):
                             self.status_bar.success(MESSAGE["txt_select"][0])
 
     def remove_data(self, remove_mode: str = None):
-        image_without_exif = self.image_data.remove_data(self.file_path)
+        image_without_exif = self.image_data.remove_data(self.file_path)  # noqa: F841
         new_stem = self.file_path.stem + "_data_removed"
         new_path = self.file_path.with_stem(new_stem)
         if not remove_mode:
@@ -672,7 +760,7 @@ class App(Tk):
                 self.image_data.save_image(
                     self.file_path, new_path, self.image_data.format
                 )
-            except:
+            except Exception:
                 print("Remove error")
             else:
                 self.status_bar.success(MESSAGE["suffix"][0])
@@ -685,7 +773,7 @@ class App(Tk):
                         self.image_data.save_image(
                             self.file_path, self.file_path, self.image_data.format
                         )
-                    except:
+                    except Exception:
                         print("Remove error")
                     else:
                         self.status_bar.success(MESSAGE["overwrite"][0])
@@ -700,13 +788,13 @@ class App(Tk):
                             self.image_data.save_image(
                                 self.file_path, path, self.image_data.format
                             )
-                        except:
+                        except Exception:
                             print("Remove error")
                         else:
                             self.status_bar.success(MESSAGE["remove_select"][0])
 
     def save_data(self, save_mode: str = None):
-        with Image.open(self.file_path) as image:
+        with Image.open(self.file_path) as image:  # noqa: F841
             new_stem = self.file_path.stem + "_edited"
             new_path = self.file_path.with_stem(new_stem)
             data = (
@@ -720,7 +808,7 @@ class App(Tk):
                     self.image_data.save_image(
                         self.file_path, new_path, self.image_data.format, data
                     )
-                except:
+                except Exception:
                     print("Save error")
                 else:
                     self.status_bar.success(MESSAGE["suffix"][0])
@@ -734,7 +822,7 @@ class App(Tk):
                                 self.image_data.format,
                                 data,
                             )
-                        except:
+                        except Exception:
                             print("Save error")
                         else:
                             self.status_bar.success(MESSAGE["overwrite"][0])
@@ -749,7 +837,7 @@ class App(Tk):
                                 self.image_data.save_image(
                                     self.file_path, path, self.image_data.format, data
                                 )
-                            except:
+                            except Exception:
                                 print("Save error")
                             else:
                                 self.status_bar.success(MESSAGE["remove_select"][0])
@@ -863,6 +951,35 @@ class App(Tk):
             CTkImage(Image.open(icon_file[0]), size=size),
             CTkImage(Image.open(icon_file[1]), size=size),
         )
+
+    def toggle_raw_mode(self):
+        if self.raw_mode == RawMode.PARSED:
+            # Switch to raw
+            self.raw_mode = RawMode.RAW
+            # Hide parsed boxes
+            self.positive_box.viewer_frame.grid_remove()
+            self.negative_box.viewer_frame.grid_remove()
+            self.setting_box.grid_remove()
+            self.setting_box_simple.grid_remove()
+            # Show raw box
+            self.raw_box.grid()
+            if self.image_data and self.image_data.true_raw:
+                self.raw_box.text = self.image_data.true_raw
+            else:
+                self.raw_box.text = "No raw metadata available"
+            self.status_bar.info("Raw metadata view")
+        else:
+            # Switch back to parsed
+            self.raw_mode = RawMode.PARSED
+            self.raw_box.grid_remove()
+            self.positive_box.viewer_frame.grid()
+            self.negative_box.viewer_frame.grid()
+            # Restore setting box based on current setting mode
+            if self.button_view_setting.mode == SettingMode.SIMPLE:
+                self.setting_box_simple.grid()
+            else:
+                self.setting_box.grid()
+            self.status_bar.info("Parsed view")
 
 
 def main():

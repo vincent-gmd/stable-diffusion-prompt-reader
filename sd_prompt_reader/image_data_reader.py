@@ -1,3 +1,4 @@
+# _sd_prompt_reader/image_data_reader.py
 __author__ = "receyuki"
 __filename__ = "image_data_reader.py"
 __copyright__ = "Copyright 2023"
@@ -39,6 +40,7 @@ class ImageDataReader:
         self._negative_sdxl = {}
         self._setting = ""
         self._raw = ""
+        self._true_raw = ""
         self._tool = ""
         self._parameter_key = ["model", "sampler", "seed", "cfg", "steps", "size"]
         self._parameter = dict.fromkeys(self._parameter_key, PARAMETER_PLACEHOLDER)
@@ -59,8 +61,31 @@ class ImageDataReader:
         with Image.open(file) as f:
             self._width = f.width
             self._height = f.height
-            self._info = f.info
+            self._info = f.info 
             self._format = f.format
+            
+            # Make a deep, safe copy of f.info
+            raw_info = f.info.copy()
+
+            # === Decode EXIF if present ===
+            if "exif" in raw_info:
+                exif_data = raw_info["exif"]
+                if isinstance(exif_data, bytes):
+                    exif_dict = piexif.load(exif_data)
+                    exif_dict = ImageDataReader._decode_exif_user_comment(exif_dict)  
+                    raw_info["exif"] = exif_dict
+            # === Decode XMP if present ===
+            if "XML:com.adobe.xmp" in raw_info:
+                try:
+                    # It's usually a string already, but ensure it's not bytes
+                    xmp = raw_info["XML:com.adobe.xmp"]
+                    if isinstance(xmp, bytes):
+                        raw_info["XML:com.adobe.xmp"] = xmp.decode('utf-8')
+                except Exception:
+                    pass
+            # === Store true_raw as clean JSON ===
+            self._true_raw = json.dumps(raw_info, indent=2, ensure_ascii=False, default=str)
+
             # swarm legacy format
             try:
                 exif = json.loads(f.getexif().get(0x0110))
@@ -288,6 +313,21 @@ class ImageDataReader:
 
     def prompt_to_line(self):
         return self._parser.prompt_to_line()
+    
+    def _decode_exif_user_comment(exif_dict):
+        """Recursively decode UserComment if present."""
+        if "Exif" in exif_dict:
+            user_comment_tag = piexif.ExifIFD.UserComment
+            if user_comment_tag in exif_dict["Exif"]:
+                try:
+                    raw_comment = exif_dict["Exif"][user_comment_tag]
+                    if isinstance(raw_comment, bytes):
+                        decoded = piexif.helper.UserComment.load(raw_comment)
+                        exif_dict["Exif"][user_comment_tag] = decoded
+                except Exception as e:
+                    # Log or leave as-is if decoding fails
+                    pass
+        return exif_dict
 
     @property
     def height(self):
@@ -348,3 +388,7 @@ class ImageDataReader:
     @property
     def status(self):
         return self._status
+    
+    @property
+    def true_raw(self):
+        return self._true_raw
